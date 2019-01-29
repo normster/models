@@ -54,6 +54,19 @@ MODEL_BUILD_UTIL_MAP = {
 }
 
 
+def run_attack(model, image, size, lr=0.1):
+    image = tf.expand_dims(image, axis=0)
+    size = tf.expand_dims(size, axis=0)
+
+    out = model.postprocess(model.predict(image, size), size)
+    obj = tf.reduce_mean(out['detection_scores'])
+    grad = tf.gradients(obj, image)
+
+    update = -lr * tf.sign(grad)[0]
+    tf.get_variable_scope().reuse_variables()
+    return tf.stop_gradient((image + update)[0])
+
+
 def _prepare_groundtruth_for_eval(detection_model, class_agnostic,
                                   max_number_of_boxes):
   """Extracts groundtruth data from detection_model and prepares it for eval.
@@ -270,6 +283,8 @@ def create_model_fn(detection_model_fn, configs, hparams, use_tpu=False):
           groundtruth_is_crowd_list=gt_is_crowd_list)
 
     preprocessed_images = features[fields.InputDataFields.image]
+    preprocessed_images = run_attack(detection_model, preprocessed_images, fields.InputDataFields.true_image_shape)
+
     if use_tpu and train_config.use_bfloat16:
       with tf.contrib.tpu.bfloat16_scope():
         prediction_dict = detection_model.predict(
