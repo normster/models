@@ -54,18 +54,6 @@ MODEL_BUILD_UTIL_MAP = {
 }
 
 
-def run_attack(model, image, size, lr=0.1):
-    out = model.postprocess(model.predict(image, size), size)
-    obj = tf.reduce_mean(out['detection_scores'])
-    grad = tf.gradients(obj, image)
-
-    update = -lr * tf.sign(grad)[0]
-    adv_image = tf.add(image, update) 
-
-    tf.get_variable_scope()._reuse = tf.AUTO_REUSE
-    return adv_image
-
-
 def _prepare_groundtruth_for_eval(detection_model, class_agnostic,
                                   max_number_of_boxes):
   """Extracts groundtruth data from detection_model and prepares it for eval.
@@ -196,7 +184,7 @@ def unstack_batch(tensor_dict, unpad_groundtruth_tensors=True):
   return unbatched_tensor_dict
 
 
-def create_model_fn(detection_model_fn, adv_detection_model_fn, configs, hparams, use_tpu=False):
+def create_model_fn(detection_model_fn, configs, hparams, use_tpu=False):
   """Creates a model function for `Estimator`.
 
   Args:
@@ -235,8 +223,6 @@ def create_model_fn(detection_model_fn, adv_detection_model_fn, configs, hparams
     # False for inference.
     tf.keras.backend.set_learning_phase(is_training)
     detection_model = detection_model_fn(
-        is_training=is_training, add_summaries=(not use_tpu))
-    adv_detection_model = adv_detection_model_fn(
         is_training=is_training, add_summaries=(not use_tpu))
     scaffold_fn = None
 
@@ -284,8 +270,6 @@ def create_model_fn(detection_model_fn, adv_detection_model_fn, configs, hparams
           groundtruth_is_crowd_list=gt_is_crowd_list)
 
     preprocessed_images = features[fields.InputDataFields.image]
-    size = features[fields.InputDataFields.true_image_shape]
-    preprocessed_images = run_attack(adv_detection_model, preprocessed_images, size)
 
     if use_tpu and train_config.use_bfloat16:
       with tf.contrib.tpu.bfloat16_scope():
@@ -614,12 +598,6 @@ def create_estimator_and_inputs(run_config,
   detection_model_fn = functools.partial(
       model_builder.build, model_config=model_config)
 
-  adv_config = copy.deepcopy(model_config)
-  adv_config.faster_rcnn.first_stage_nms_iou_threshold = 0.9
-  adv_config.faster_rcnn.first_stage_max_proposals = 3000
-  adv_detection_model_fn = functools.partial(
-      model_builder.build, model_config=adv_config)
-
   # Create the input functions for TRAIN/EVAL/PREDICT.
   train_input_fn = create_train_input_fn(
       train_config=train_config,
@@ -644,7 +622,7 @@ def create_estimator_and_inputs(run_config,
   export_to_tpu = hparams.get('export_to_tpu', False)
   tf.logging.info('create_estimator_and_inputs: use_tpu %s, export_to_tpu %s',
                   use_tpu, export_to_tpu)
-  model_fn = model_fn_creator(detection_model_fn, adv_detection_model_fn, configs, hparams, use_tpu)
+  model_fn = model_fn_creator(detection_model_fn, configs, hparams, use_tpu)
 
   if use_tpu_estimator:
     estimator = tf.contrib.tpu.TPUEstimator(

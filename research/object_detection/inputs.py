@@ -46,6 +46,20 @@ INPUT_BUILDER_UTIL_MAP = {
     'dataset_build': dataset_builder.build,
 }
 
+def run_attack(model, image, size, lr=0.1):
+  image = tf.expand_dims(image, axis=0)
+  size = tf.expand_dims(size, axis=0)
+
+  out = model.postprocess(model.predict(image, size), size)
+  obj = tf.reduce_mean(out['detection_scores'])
+  grad = tf.gradients(obj, image)
+  update = -lr * tf.sign(grad)[0]
+  adv_image = tf.add(image, update)[0]
+
+  tf.get_variable_scope()._reuse = tf.AUTO_REUSE
+
+  return adv_image
+
 
 def transform_input_data(tensor_dict,
                          model_preprocess_fn,
@@ -483,9 +497,20 @@ def create_train_input_fn(train_config, train_input_config,
               image_resizer_config))
       return (_get_features_dict(tensor_dict), _get_labels_dict(tensor_dict))
 
+    def adv_transform_and_pad_input_data_fn(tensor_dict):
+      """Adversarially perturb input data a la Xie 17"""
+      features, labels = transform_and_pad_input_data_fn(tensor_dict)
+      adv_config = copy.deepcopy(model_config)
+      adv_config.faster_rcnn.first_stage_nms_iou_threshold = 0.9
+      adv_config.faster_rcnn.first_stage_max_proposals = 3000
+      model = model_builder.build(adv_config, is_training=False)
+      adv_image = run_attack(model, features['image'], features['true_image_shape'])
+      features['image'] = adv_image
+      return features, labels
+
     dataset = INPUT_BUILDER_UTIL_MAP['dataset_build'](
         train_input_config,
-        transform_input_data_fn=transform_and_pad_input_data_fn,
+        transform_input_data_fn=adv_transform_and_pad_input_data_fn,
         batch_size=params['batch_size'] if params else train_config.batch_size)
     return dataset
 
