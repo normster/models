@@ -19,11 +19,18 @@ from __future__ import division
 from __future__ import print_function
 
 from absl import flags
+from PIL import Image
 
 import tensorflow as tf
 
 from object_detection import model_hparams
 from object_detection import model_lib
+from utils import label_map_util
+from utils import visualization_utils as vis_util
+
+import pickle
+import numpy as np
+
 
 flags.DEFINE_string(
     'model_dir', None, 'Path to output model directory '
@@ -50,10 +57,43 @@ flags.DEFINE_string(
     '`checkpoint_dir` is provided, this binary operates in eval-only mode, '
     'writing resulting metrics to `model_dir`.')
 flags.DEFINE_boolean(
-    'run_once', False, 'If running in eval-only mode, whether to run just '
+    'run_once', True, 'If running in eval-only mode, whether to run just '
     'one round of eval vs running continuously (default).'
 )
 FLAGS = flags.FLAGS
+
+CATEGORIES = label_map_util.create_category_index_from_labelmap('data/kitti_label_map.pbtxt', use_display_name=True)
+
+class save_image_hook(tf.train.SessionRunHook):
+
+    def __init__(self):
+        self.i = 0
+
+    def before_run(self, run_context):
+        image = tf.get_default_graph().get_tensor_by_name("adv_image:0")
+        bbox = tf.get_default_graph().get_tensor_by_name("final_bboxes:0")
+        scores = tf.get_default_graph().get_tensor_by_name("final_scores:0")
+        classes = tf.get_default_graph().get_tensor_by_name("final_classes:0")
+        return tf.train.SessionRunArgs([image, bbox, scores, classes])
+    
+    def after_run(self, run_context, run_values):
+        image, bbox, scores, classes = run_values.results
+        image = image[0].astype(np.uint8)
+        bbox = bbox[0]
+        scores = scores[0]
+        classes = classes[0].astype(np.uint8)
+        vis_util.visualize_boxes_and_labels_on_image_array(
+          image,
+          bbox, 
+          classes,
+          scores,
+          CATEGORIES,
+          use_normalized_coordinates=True,
+          line_thickness=8)
+        im = Image.fromarray(image)
+        im.save("adv_image{}.png".format(self.i))
+
+        self.i += 1
 
 
 def main(unused_argv):
@@ -85,10 +125,11 @@ def main(unused_argv):
       # The first eval input will be evaluated.
       input_fn = eval_input_fns[0]
     if FLAGS.run_once:
+      hook = save_image_hook()
       estimator.evaluate(input_fn,
-                         num_eval_steps=None,
                          checkpoint_path=tf.train.latest_checkpoint(
-                             FLAGS.checkpoint_dir))
+                             FLAGS.checkpoint_dir),
+                         hooks=[hook])
     else:
       model_lib.continuous_eval(estimator, FLAGS.checkpoint_dir, input_fn,
                                 train_steps, name)
