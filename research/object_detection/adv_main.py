@@ -129,7 +129,7 @@ def main(unused_argv):
       estimator.evaluate(input_fn,
                          checkpoint_path=tf.train.latest_checkpoint(
                              FLAGS.checkpoint_dir),
-                         hooks=[hook])
+                         hooks=[])
     else:
       model_lib.continuous_eval(estimator, FLAGS.checkpoint_dir, input_fn,
                                 train_steps, name)

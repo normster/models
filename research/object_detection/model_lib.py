@@ -54,7 +54,7 @@ MODEL_BUILD_UTIL_MAP = {
 }
 
 
-def run_attack(model, image, size, lr=2.0):
+def run_attack(model, image, size, lr=5.0):
     tmp = model._first_stage_max_proposals
     model._first_stage_max_proposals = 300
     out = model.postprocess(model.predict(image, size), size)
@@ -65,7 +65,8 @@ def run_attack(model, image, size, lr=2.0):
     grad = tf.gradients(obj, image)
 
     update = -lr * tf.sign(grad)[0]
-    adv_image = tf.add(image, update, "adv_image") 
+    adv_image = tf.add(image, update)
+    adv_image = tf.clip_by_value(adv_image, 0, 255, "adv_image") 
 
     tf.get_variable_scope()._reuse = tf.AUTO_REUSE
     return adv_image
